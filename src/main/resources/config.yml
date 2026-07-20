@@ -1,0 +1,7 @@
+api-url: "http://127.0.0.1:8000"
+update-interval-seconds: 60
+default-role: "default"
+# update-times:
+#   - "00:00"
+#   - "05:00"
+#   - "18:00"
