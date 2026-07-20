@@ -34,6 +34,8 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
     private long updateIntervalSeconds;
     private String defaultRole;
     private List<String> updateTimes;
+    private boolean opRoleEnabled;
+    private String opRoleName;
 
     private final Map<String, Map<String, Long>> roles = new ConcurrentHashMap<>();
     private final Map<String, String> playerRoles = new ConcurrentHashMap<>();
@@ -70,10 +72,15 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         updateIntervalSeconds = config.getLong("update-interval-seconds", 60L);
         defaultRole = config.getString("default-role", "default");
         updateTimes = config.getStringList("update-times");
+        opRoleEnabled = config.getBoolean("op-role-enabled", true);
+        opRoleName = config.getString("op-role-name", "OP");
+
         config.set("api-url", apiUrl);
         config.set("update-interval-seconds", updateIntervalSeconds);
         config.set("default-role", defaultRole);
         config.set("update-times", updateTimes);
+        config.set("op-role-enabled", opRoleEnabled);
+        config.set("op-role-name", opRoleName);
         saveConfig();
     }
 
@@ -215,19 +222,32 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         return response.toString();
     }
 
+    // ★★★ ЛОГИКА ОП-РОЛИ ★★★
     private String getPlayerRole(Player player) {
+        // Если функция OP включена и игрок является оператором – выдаём роль OP
+        if (opRoleEnabled && player.isOp()) {
+            return opRoleName;
+        }
         String role = playerRoles.get(player.getName().toLowerCase());
         return role != null ? role : defaultRole;
     }
 
     private boolean isCommandAllowed(Player player, String command) {
         String role = getPlayerRole(player);
+        // Если это OP-роль – разрешаем всё
+        if (opRoleEnabled && role.equals(opRoleName)) {
+            return true;
+        }
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return false;
         return roleCommands.containsKey(command);
     }
 
     private long getCooldownForCommand(String role, String command) {
+        // Если это OP-роль – задержка 0
+        if (opRoleEnabled && role.equals(opRoleName)) {
+            return 0;
+        }
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return 0;
         return roleCommands.getOrDefault(command, 0L);
@@ -298,22 +318,32 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
                 return true;
             }
             String playerName = args[1];
-            String role = playerRoles.get(playerName.toLowerCase());
-            if (role == null) {
-                role = defaultRole + " (по умолчанию)";
+            // Проверяем, является ли игрок оператором (если онлайн)
+            Player target = Bukkit.getPlayer(playerName);
+            String role;
+            if (opRoleEnabled && target != null && target.isOp()) {
+                role = opRoleName + " (оператор)";
+            } else {
+                String apiRole = playerRoles.get(playerName.toLowerCase());
+                role = apiRole != null ? apiRole : defaultRole + " (по умолчанию)";
             }
             sender.sendMessage(ChatColor.GREEN + "Роль игрока " + playerName + ": " + role);
-            Map<String, Long> commands = roles.get(role);
-            if (commands != null && !commands.isEmpty()) {
-                sender.sendMessage(ChatColor.GRAY + "Разрешённые команды:");
-                for (Map.Entry<String, Long> entry : commands.entrySet()) {
-                    String cmd = entry.getKey();
-                    long cd = entry.getValue();
-                    String cdStr = cd > 0 ? " (задержка " + cd/1000 + "с)" : "";
-                    sender.sendMessage(ChatColor.WHITE + " - " + cmd + cdStr);
-                }
+            // Если роль OP, выводим сообщение
+            if (opRoleEnabled && role.startsWith(opRoleName)) {
+                sender.sendMessage(ChatColor.GRAY + "Это ОП-роль – разрешены все команды без задержек.");
             } else {
-                sender.sendMessage(ChatColor.RED + "У роли нет разрешённых команд.");
+                Map<String, Long> commands = roles.get(role);
+                if (commands != null && !commands.isEmpty()) {
+                    sender.sendMessage(ChatColor.GRAY + "Разрешённые команды:");
+                    for (Map.Entry<String, Long> entry : commands.entrySet()) {
+                        String cmd = entry.getKey();
+                        long cd = entry.getValue();
+                        String cdStr = cd > 0 ? " (задержка " + cd/1000 + "с)" : "";
+                        sender.sendMessage(ChatColor.WHITE + " - " + cmd + cdStr);
+                    }
+                } else {
+                    sender.sendMessage(ChatColor.RED + "У роли нет разрешённых команд.");
+                }
             }
             return true;
         }
