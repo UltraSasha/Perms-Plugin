@@ -15,11 +15,16 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -28,11 +33,14 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
     private String apiUrl;
     private long updateIntervalSeconds;
     private String defaultRole;
+    private List<String> updateTimes;
 
     private final Map<String, Map<String, Long>> roles = new ConcurrentHashMap<>();
     private final Map<String, String> playerRoles = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> cooldowns = new ConcurrentHashMap<>();
     private final Gson gson = new Gson();
+
+    private BukkitTask scheduledTask = null;
 
     @Override
     public void onEnable() {
@@ -40,19 +48,19 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         reloadConfig();
         loadConfig();
         getServer().getPluginManager().registerEvents(this, this);
+
         updatePermissions();
-        long ticks = updateIntervalSeconds * 20L;
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                updatePermissions();
-            }
-        }.runTaskTimerAsynchronously(this, ticks, ticks);
+        scheduleNextUpdate();
+
         getLogger().info("PermsPlugin включён!");
     }
 
     @Override
     public void onDisable() {
+        if (scheduledTask != null) {
+            scheduledTask.cancel();
+            scheduledTask = null;
+        }
         getLogger().info("PermsPlugin выключен.");
     }
 
@@ -61,10 +69,84 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         apiUrl = config.getString("api-url", "http://example.com/api/permissions");
         updateIntervalSeconds = config.getLong("update-interval-seconds", 60L);
         defaultRole = config.getString("default-role", "default");
+        updateTimes = config.getStringList("update-times");
         config.set("api-url", apiUrl);
         config.set("update-interval-seconds", updateIntervalSeconds);
         config.set("default-role", defaultRole);
+        config.set("update-times", updateTimes);
         saveConfig();
+    }
+
+    private void scheduleNextUpdate() {
+        if (scheduledTask != null) {
+            scheduledTask.cancel();
+            scheduledTask = null;
+        }
+
+        if (updateTimes != null && !updateTimes.isEmpty()) {
+            ZonedDateTime now = ZonedDateTime.now(ZoneId.of("GMT"));
+            List<LocalTime> times = new ArrayList<>();
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
+            for (String timeStr : updateTimes) {
+                try {
+                    LocalTime lt = LocalTime.parse(timeStr, formatter);
+                    times.add(lt);
+                } catch (Exception e) {
+                    getLogger().warning("Некорректное время в update-times: " + timeStr);
+                }
+            }
+            if (times.isEmpty()) {
+                getLogger().warning("Нет корректных времён в update-times, переключаюсь на интервальный режим");
+                scheduleIntervalUpdate();
+                return;
+            }
+
+            ZonedDateTime next = null;
+            for (LocalTime lt : times) {
+                ZonedDateTime candidate = now.with(lt);
+                if (candidate.isBefore(now) || candidate.equals(now)) {
+                    candidate = candidate.plusDays(1);
+                }
+                if (next == null || candidate.isBefore(next)) {
+                    next = candidate;
+                }
+            }
+
+            if (next == null) {
+                getLogger().warning("Не удалось определить следующее время обновления");
+                scheduleIntervalUpdate();
+                return;
+            }
+
+            long delayMillis = next.toInstant().toEpochMilli() - System.currentTimeMillis();
+            if (delayMillis < 0) delayMillis = 0;
+            long delayTicks = delayMillis / 50;
+
+            getLogger().info("Следующее обновление запланировано на " + next.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) + " GMT (через " + (delayMillis / 1000) + " секунд)");
+
+            scheduledTask = Bukkit.getScheduler().runTaskLater(this, () -> {
+                updatePermissions();
+                scheduleNextUpdate();
+            }, delayTicks);
+        } else {
+            scheduleIntervalUpdate();
+        }
+    }
+
+    private void scheduleIntervalUpdate() {
+        if (scheduledTask != null) {
+            scheduledTask.cancel();
+            scheduledTask = null;
+        }
+        long ticks = updateIntervalSeconds * 20L;
+        if (ticks <= 0) {
+            getLogger().warning("Интервал обновления равен 0, обновления по расписанию отключены");
+            return;
+        }
+        getLogger().info("Включён интервальный режим обновления (каждые " + updateIntervalSeconds + " секунд)");
+        scheduledTask = Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
+            updatePermissions();
+        }, ticks, ticks);
     }
 
     private void updatePermissions() {
