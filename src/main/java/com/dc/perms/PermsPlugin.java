@@ -1,4 +1,4 @@
-package com.yourname.perms;
+package com.dc.perms;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
