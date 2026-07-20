@@ -177,6 +177,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
                     for (Map.Entry<String, JsonElement> cmdEntry : commandsObj.entrySet()) {
                         String command = cmdEntry.getKey();
                         long cooldown = cmdEntry.getValue().getAsLong();
+                        command = command.trim().toLowerCase();
                         if (!command.startsWith("/")) {
                             command = "/" + command;
                         }
@@ -222,9 +223,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         return response.toString();
     }
 
-    // ★★★ ЛОГИКА ОП-РОЛИ ★★★
     private String getPlayerRole(Player player) {
-        // Если функция OP включена и игрок является оператором – выдаём роль OP
         if (opRoleEnabled && player.isOp()) {
             return opRoleName;
         }
@@ -232,49 +231,65 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         return role != null ? role : defaultRole;
     }
 
-    private boolean isCommandAllowed(Player player, String command) {
+    // ★★★ ГИБКАЯ ЛОГИКА ПРОВЕРКИ ★★★
+    private boolean isCommandAllowed(Player player, String fullCommand) {
+        String cmd = fullCommand.trim().toLowerCase();
+        String baseCmd = cmd.split(" ")[0];
+
+        if (baseCmd.startsWith("/perms")) return true;
+        if (opRoleEnabled && player.isOp()) return true;
+
         String role = getPlayerRole(player);
-        // Если это OP-роль – разрешаем всё
-        if (opRoleEnabled && role.equals(opRoleName)) {
-            return true;
-        }
+        if (role.equals(opRoleName) && opRoleEnabled) return true;
+
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return false;
-        return roleCommands.containsKey(command);
+
+        // Сначала точное совпадение
+        if (roleCommands.containsKey(cmd)) return true;
+        // Потом базовая команда
+        return roleCommands.containsKey(baseCmd);
     }
 
-    private long getCooldownForCommand(String role, String command) {
-        // Если это OP-роль – задержка 0
-        if (opRoleEnabled && role.equals(opRoleName)) {
-            return 0;
-        }
+    private long getCooldownForCommand(String role, String fullCommand) {
+        String cmd = fullCommand.trim().toLowerCase();
+        String baseCmd = cmd.split(" ")[0];
+
+        if (baseCmd.startsWith("/perms")) return 0;
+        if (opRoleEnabled && role.equals(opRoleName)) return 0;
+
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return 0;
-        return roleCommands.getOrDefault(command, 0L);
+
+        // Приоритет у точной команды
+        if (roleCommands.containsKey(cmd)) {
+            return roleCommands.get(cmd);
+        }
+        return roleCommands.getOrDefault(baseCmd, 0L);
     }
 
     @EventHandler
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
         Player player = event.getPlayer();
-        String fullCommand = event.getMessage();
-        String command = fullCommand.split(" ")[0];
-        if (!command.startsWith("/")) {
-            command = "/" + command;
+        String fullCommand = event.getMessage().trim();
+
+        if (fullCommand.toLowerCase().startsWith("/perms")) {
+            return;
         }
 
-        if (!isCommandAllowed(player, command)) {
+        if (!isCommandAllowed(player, fullCommand)) {
             event.setCancelled(true);
             player.sendMessage(ChatColor.RED + "У вас нет прав на использование этой команды.");
             return;
         }
 
         String role = getPlayerRole(player);
-        long cooldownMillis = getCooldownForCommand(role, command);
+        long cooldownMillis = getCooldownForCommand(role, fullCommand);
         if (cooldownMillis > 0) {
             UUID uuid = player.getUniqueId();
             Map<String, Long> playerCooldowns = cooldowns.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
             long now = System.currentTimeMillis();
-            Long lastUsed = playerCooldowns.get(command);
+            Long lastUsed = playerCooldowns.get(fullCommand.toLowerCase());
             if (lastUsed != null && (now - lastUsed) < cooldownMillis) {
                 long remaining = cooldownMillis - (now - lastUsed);
                 long seconds = remaining / 1000;
@@ -282,7 +297,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
                 player.sendMessage(ChatColor.RED + "Подождите " + seconds + " секунд перед повторным использованием команды.");
                 return;
             }
-            playerCooldowns.put(command, now);
+            playerCooldowns.put(fullCommand.toLowerCase(), now);
         }
     }
 
@@ -318,23 +333,23 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
                 return true;
             }
             String playerName = args[1];
-            // Проверяем, является ли игрок оператором (если онлайн)
             Player target = Bukkit.getPlayer(playerName);
             String role;
+            boolean isOp = false;
             if (opRoleEnabled && target != null && target.isOp()) {
                 role = opRoleName + " (оператор)";
+                isOp = true;
             } else {
                 String apiRole = playerRoles.get(playerName.toLowerCase());
                 role = apiRole != null ? apiRole : defaultRole + " (по умолчанию)";
             }
             sender.sendMessage(ChatColor.GREEN + "Роль игрока " + playerName + ": " + role);
-            // Если роль OP, выводим сообщение
-            if (opRoleEnabled && role.startsWith(opRoleName)) {
+            if (isOp || (opRoleEnabled && role.startsWith(opRoleName))) {
                 sender.sendMessage(ChatColor.GRAY + "Это ОП-роль – разрешены все команды без задержек.");
             } else {
                 Map<String, Long> commands = roles.get(role);
                 if (commands != null && !commands.isEmpty()) {
-                    sender.sendMessage(ChatColor.GRAY + "Разрешённые команды:");
+                    sender.sendMessage(ChatColor.GRAY + "Разрешённые команды (точное или базовое совпадение):");
                     for (Map.Entry<String, Long> entry : commands.entrySet()) {
                         String cmd = entry.getKey();
                         long cd = entry.getValue();
