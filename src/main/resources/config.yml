@@ -5,3 +5,7 @@ default-role: "default"
 #   - "00:00"
 #   - "05:00"
 #   - "18:00"
+
+# Роль для операторов (OP)
+op-role-enabled: true
+op-role-name: "op"
