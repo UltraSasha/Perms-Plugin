@@ -1,0 +1,15 @@
+name: PermsPlugin
+version: 1.0
+main: com.dc.perms.PermsPlugin
+api-version: 1.19
+author: Deezer Craft
+description: Внешняя система прав с задержками команд
+commands:
+  perms:
+    description: Управление плагином прав
+    usage: /perms <update|check <игрок>>
+    permission: op
+permissions:
+  perms.admin:
+    description: Доступ к командам /perms
+    default: op
