@@ -36,6 +36,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
     private List<String> updateTimes;
     private boolean opRoleEnabled;
     private String opRoleName;
+    private List<String> timeRequiredCommands; // новый список
 
     private final Map<String, Map<String, Long>> roles = new ConcurrentHashMap<>();
     private final Map<String, String> playerRoles = new ConcurrentHashMap<>();
@@ -74,6 +75,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         updateTimes = config.getStringList("update-times");
         opRoleEnabled = config.getBoolean("op-role-enabled", true);
         opRoleName = config.getString("op-role-name", "OP");
+        timeRequiredCommands = config.getStringList("time-required-commands");
 
         config.set("api-url", apiUrl);
         config.set("update-interval-seconds", updateIntervalSeconds);
@@ -81,6 +83,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         config.set("update-times", updateTimes);
         config.set("op-role-enabled", opRoleEnabled);
         config.set("op-role-name", opRoleName);
+        config.set("time-required-commands", timeRequiredCommands);
         saveConfig();
     }
 
@@ -231,12 +234,19 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         return role != null ? role : defaultRole;
     }
 
-    // ★★★ ГИБКАЯ ЛОГИКА ПРОВЕРКИ ★★★
+    // ★★★ ПРОВЕРКА НАЛИЧИЯ ВРЕМЕНИ В СТРОКЕ КОМАНДЫ ★★★
+    private boolean hasTimeArgument(String command) {
+        // Ищем паттерн: цифра (одна или более) + одна из букв s,m,h,d
+        return command.matches(".*\\d+[smhd].*");
+    }
+
     private boolean isCommandAllowed(Player player, String fullCommand) {
         String cmd = fullCommand.trim().toLowerCase();
         String baseCmd = cmd.split(" ")[0];
 
+        // Команда /perms всегда разрешена
         if (baseCmd.startsWith("/perms")) return true;
+        // Операторы (OP) имеют полный доступ
         if (opRoleEnabled && player.isOp()) return true;
 
         String role = getPlayerRole(player);
@@ -245,10 +255,20 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return false;
 
-        // Сначала точное совпадение
-        if (roleCommands.containsKey(cmd)) return true;
-        // Потом базовая команда
-        return roleCommands.containsKey(baseCmd);
+        // Проверяем, разрешена ли команда (точное или базовое совпадение)
+        boolean allowed = roleCommands.containsKey(cmd) || roleCommands.containsKey(baseCmd);
+        if (!allowed) return false;
+
+        // Если команда требует времени, проверяем наличие аргумента с временем
+        if (timeRequiredCommands.contains(baseCmd)) {
+            // Если игрок не оператор (они уже пропущены выше, но на всякий случай)
+            // И если в команде нет шаблона времени — запрещаем
+            if (!hasTimeArgument(cmd)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private long getCooldownForCommand(String role, String fullCommand) {
