@@ -9,3 +9,11 @@ default-role: "default"
 # Роль для операторов (OP)
 op-role-enabled: true
 op-role-name: "op"
+
+# Команды, для которых обязательно указывать время (в любом аргументе)
+time-required-commands:
+  - "/ban"
+  - "/mute"
+  - "/jail"
+  - "/tempban"
+  - "/tempmute"
