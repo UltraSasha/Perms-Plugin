@@ -1,12 +1,26 @@
-# Режим получения прав: "api" или "local"
+# Режим работы: "api" или "local"
 source: "local"
 
-# Настройки для режима "api"
+# --- Настройки для режима "api" (игнорируются если source = local) ---
 api-url: "http://example.com/api/permissions"
 update-interval-seconds: 60
+update-times:
+  - "00:00"
+  - "05:00"
+  - "18:00"
 
-# Настройки для режима "local"
-# Здесь вы можете задать роли и игроков прямо в конфиге
+# --- Общие настройки (работают в любом режиме) ---
+default-role: "default"
+op-role-enabled: true
+op-role-name: "OP"
+
+# Команды, для которых требуется указывать время (формат: 1h, 30m, 2d)
+time-required-commands:
+  - "/ban"
+  - "/mute"
+  - "/jail"
+
+# --- Локальные роли (используются если source = local) ---
 local-roles:
   Вип:
     /help: 60000
@@ -35,17 +49,10 @@ local-roles:
     /sethome: 45000
     /warp: 40000
     /back: 40000
-  # ... и так далее все роли
+  # ... добавьте остальные роли по аналогии
 
+# --- Локальные игроки ---
 local-players:
   Steve: "Вип"
   Alex: "Креатив"
-  # ... и другие игроки
-
-# Остальные настройки (op-role, время обновления для api и т.д.)
-op-role-enabled: true
-op-role-name: "OP"
-time-required-commands:
-  - "/ban"
-  - "/mute"
-  - "/jail"
+  YourName: "Админ"   # замените на свой ник
