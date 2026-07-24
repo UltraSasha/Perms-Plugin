@@ -8,6 +8,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -30,13 +31,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class PermsPlugin extends JavaPlugin implements Listener {
 
+    private String source;          // "api" или "local"
     private String apiUrl;
     private long updateIntervalSeconds;
     private String defaultRole;
     private List<String> updateTimes;
     private boolean opRoleEnabled;
     private String opRoleName;
-    private List<String> timeRequiredCommands; // новый список
+    private List<String> timeRequiredCommands;
 
     private final Map<String, Map<String, Long>> roles = new ConcurrentHashMap<>();
     private final Map<String, String> playerRoles = new ConcurrentHashMap<>();
@@ -52,10 +54,17 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         loadConfig();
         getServer().getPluginManager().registerEvents(this, this);
 
+        // Загружаем права (из API или локально)
         updatePermissions();
-        scheduleNextUpdate();
 
-        getLogger().info("PermsPlugin включён!");
+        // Запускаем расписание только если source == "api"
+        if ("api".equalsIgnoreCase(source)) {
+            scheduleNextUpdate();
+        } else {
+            getLogger().info("Режим 'local' – автоматическое обновление отключено. Используйте /perms update для перезагрузки конфига.");
+        }
+
+        getLogger().info("PermsPlugin включён! Режим: " + source);
     }
 
     @Override
@@ -69,6 +78,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
 
     private void loadConfig() {
         FileConfiguration config = getConfig();
+        source = config.getString("source", "api").toLowerCase();
         apiUrl = config.getString("api-url", "http://example.com/api/permissions");
         updateIntervalSeconds = config.getLong("update-interval-seconds", 60L);
         defaultRole = config.getString("default-role", "default");
@@ -77,6 +87,8 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         opRoleName = config.getString("op-role-name", "OP");
         timeRequiredCommands = config.getStringList("time-required-commands");
 
+        // Сохраняем настройки обратно в конфиг, чтобы они были видны
+        config.set("source", source);
         config.set("api-url", apiUrl);
         config.set("update-interval-seconds", updateIntervalSeconds);
         config.set("default-role", defaultRole);
@@ -91,6 +103,11 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         if (scheduledTask != null) {
             scheduledTask.cancel();
             scheduledTask = null;
+        }
+
+        // Если режим не "api", не запускаем расписание
+        if (!"api".equalsIgnoreCase(source)) {
+            return;
         }
 
         if (updateTimes != null && !updateTimes.isEmpty()) {
@@ -148,6 +165,10 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
             scheduledTask.cancel();
             scheduledTask = null;
         }
+        // Если режим не "api", не запускаем интервальное обновление
+        if (!"api".equalsIgnoreCase(source)) {
+            return;
+        }
         long ticks = updateIntervalSeconds * 20L;
         if (ticks <= 0) {
             getLogger().warning("Интервал обновления равен 0, обновления по расписанию отключены");
@@ -160,6 +181,55 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
     }
 
     private void updatePermissions() {
+        if ("local".equalsIgnoreCase(source)) {
+            // Загружаем из конфига
+            loadLocalPermissions();
+        } else {
+            // Загружаем из API
+            fetchPermissionsFromApi();
+        }
+    }
+
+    private void loadLocalPermissions() {
+        getLogger().info("Загрузка прав из локального конфига...");
+        FileConfiguration config = getConfig();
+        ConfigurationSection rolesSection = config.getConfigurationSection("local-roles");
+        ConfigurationSection playersSection = config.getConfigurationSection("local-players");
+
+        roles.clear();
+        playerRoles.clear();
+
+        if (rolesSection != null) {
+            for (String roleName : rolesSection.getKeys(false)) {
+                ConfigurationSection commandsSection = rolesSection.getConfigurationSection(roleName);
+                if (commandsSection != null) {
+                    Map<String, Long> cmdMap = new HashMap<>();
+                    for (String command : commandsSection.getKeys(false)) {
+                        long cooldown = commandsSection.getLong(command, 0);
+                        String cmd = command.trim().toLowerCase();
+                        if (!cmd.startsWith("/")) {
+                            cmd = "/" + cmd;
+                        }
+                        cmdMap.put(cmd, cooldown);
+                    }
+                    roles.put(roleName, cmdMap);
+                }
+            }
+        }
+
+        if (playersSection != null) {
+            for (String playerName : playersSection.getKeys(false)) {
+                String roleName = playersSection.getString(playerName);
+                if (roleName != null) {
+                    playerRoles.put(playerName.toLowerCase(), roleName);
+                }
+            }
+        }
+
+        getLogger().info("Локальные данные загружены. Ролей: " + roles.size() + ", игроков: " + playerRoles.size());
+    }
+
+    private void fetchPermissionsFromApi() {
         getLogger().info("Запрос прав к API: " + apiUrl);
         try {
             String response = fetchApiData(apiUrl);
@@ -200,7 +270,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
             }
             getLogger().info("Данные обновлены. Ролей: " + roles.size() + ", игроков: " + playerRoles.size());
         } catch (Exception e) {
-            getLogger().severe("Ошибка при обновлении данных: " + e.getMessage());
+            getLogger().severe("Ошибка при обновлении данных из API: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -234,9 +304,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         return role != null ? role : defaultRole;
     }
 
-    // ★★★ ПРОВЕРКА НАЛИЧИЯ ВРЕМЕНИ В СТРОКЕ КОМАНДЫ ★★★
     private boolean hasTimeArgument(String command) {
-        // Ищем паттерн: цифра (одна или более) + одна из букв s,m,h,d
         return command.matches(".*\\d+[smhd].*");
     }
 
@@ -244,9 +312,7 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         String cmd = fullCommand.trim().toLowerCase();
         String baseCmd = cmd.split(" ")[0];
 
-        // Команда /perms всегда разрешена
         if (baseCmd.startsWith("/perms")) return true;
-        // Операторы (OP) имеют полный доступ
         if (opRoleEnabled && player.isOp()) return true;
 
         String role = getPlayerRole(player);
@@ -255,14 +321,10 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return false;
 
-        // Проверяем, разрешена ли команда (точное или базовое совпадение)
         boolean allowed = roleCommands.containsKey(cmd) || roleCommands.containsKey(baseCmd);
         if (!allowed) return false;
 
-        // Если команда требует времени, проверяем наличие аргумента с временем
         if (timeRequiredCommands.contains(baseCmd)) {
-            // Если игрок не оператор (они уже пропущены выше, но на всякий случай)
-            // И если в команде нет шаблона времени — запрещаем
             if (!hasTimeArgument(cmd)) {
                 return false;
             }
@@ -281,7 +343,6 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
         Map<String, Long> roleCommands = roles.get(role);
         if (roleCommands == null) return 0;
 
-        // Приоритет у точной команды
         if (roleCommands.containsKey(cmd)) {
             return roleCommands.get(cmd);
         }
@@ -339,9 +400,12 @@ public final class PermsPlugin extends JavaPlugin implements Listener {
             new BukkitRunnable() {
                 @Override
                 public void run() {
+                    // Перезагружаем конфиг и обновляем права
+                    reloadConfig();
+                    loadConfig();
                     updatePermissions();
                     Bukkit.getScheduler().runTask(PermsPlugin.this, () -> {
-                        sender.sendMessage(ChatColor.GREEN + "Обновление завершено.");
+                        sender.sendMessage(ChatColor.GREEN + "Обновление завершено. Текущий режим: " + source);
                     });
                 }
             }.runTaskAsynchronously(this);
