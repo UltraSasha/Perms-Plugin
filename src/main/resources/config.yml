@@ -1,19 +1,51 @@
-api-url: "http://127.0.0.1:8000"
+# Режим получения прав: "api" или "local"
+source: "local"
+
+# Настройки для режима "api"
+api-url: "http://example.com/api/permissions"
 update-interval-seconds: 60
-default-role: "default"
-# update-times:
-#   - "00:00"
-#   - "05:00"
-#   - "18:00"
 
-# Роль для операторов (OP)
+# Настройки для режима "local"
+# Здесь вы можете задать роли и игроков прямо в конфиге
+local-roles:
+  Вип:
+    /help: 60000
+    /spawn: 60000
+    /list: 60000
+    /msg: 30000
+  Креатив:
+    /help: 50000
+    /spawn: 50000
+    /list: 50000
+    /msg: 25000
+    /gamemode creative: 50000
+    /heal: 50000
+    /fly: 40000
+    /feed: 30000
+  Админ:
+    /help: 45000
+    /spawn: 45000
+    /list: 45000
+    /msg: 20000
+    /gamemode creative: 45000
+    /heal: 45000
+    /fly: 35000
+    /feed: 25000
+    /home: 45000
+    /sethome: 45000
+    /warp: 40000
+    /back: 40000
+  # ... и так далее все роли
+
+local-players:
+  Steve: "Вип"
+  Alex: "Креатив"
+  # ... и другие игроки
+
+# Остальные настройки (op-role, время обновления для api и т.д.)
 op-role-enabled: true
-op-role-name: "op"
-
-# Команды, для которых обязательно указывать время (в любом аргументе)
+op-role-name: "OP"
 time-required-commands:
   - "/ban"
   - "/mute"
   - "/jail"
-  - "/tempban"
-  - "/tempmute"
